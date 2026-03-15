@@ -23,10 +23,12 @@ All services deploy to **Railway**. Each `apps/*` directory has its own `railway
 
 ### Services
 
-| Service | Path | Description |
-|---|---|---|
-| `amber-api` | `apps/api` | REST API, memory ingestion, people search, approvals |
-| `amber-worker` | `apps/worker` | Background jobs, drift detection, proactive suggestions |
+| Service | Path | URL | Description |
+|---|---|---|---|
+| `amber-core-api` | `apps/api` | https://amber-core-api-production.up.railway.app | REST API, memory ingestion, people search, approvals |
+| `amber-core-worker` | `apps/worker` | (no public domain) | Background jobs, drift detection, proactive suggestions |
+
+**Railway project**: https://railway.com/project/86f528df-931a-40e9-9bf4-c5a65b17a516
 
 ### Deploy to Railway
 
