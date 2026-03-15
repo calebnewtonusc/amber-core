@@ -1,6 +1,10 @@
 # amber-core
 
-The Amber platform core — memory engine, people graph, search, approvals, and identity. This repo is the shared foundation that all Amber deployments (e.g. `amber-sagar`) build on.
+The Amber platform foundation — memory engine, people graph, REST API, and background worker. All Amber personal agents are powered by this layer.
+
+**Railway project**: https://railway.com/project/86f528df-931a-40e9-9bf4-c5a65b17a516
+
+---
 
 ## Architecture
 
@@ -11,83 +15,107 @@ amber-core/
     worker/    — Background jobs (drift detection, reminders) → Railway
   packages/
     shared-types/    — TypeScript domain types (Person, Memory, ActionItem...)
-    memory-engine/   — Ingestion, extraction (Claude), embedding pipeline
+    memory-engine/   — Ingestion + extraction via Claude
     people-graph/    — Hybrid search: semantic + structured + trust ranking
     storage/         — GCP Cloud Storage adapter (photos, transcripts, exports)
     prompts/         — Shared prompt templates
 ```
 
-## Deployment
+---
 
-All services deploy to **Railway**. Each `apps/*` directory has its own `railway.toml`.
+## Live Services
 
-### Services
+| Service | URL | Description |
+|---|---|---|
+| `amber-core-api` | https://amber-core-api-production.up.railway.app | REST API — people, memories, action items, approvals |
+| `amber-core-worker` | internal only | Background jobs — drift detection, proactive suggestions |
 
-| Service | Path | URL | Description |
-|---|---|---|---|
-| `amber-core-api` | `apps/api` | https://amber-core-api-production.up.railway.app | REST API, memory ingestion, people search, approvals |
-| `amber-core-worker` | `apps/worker` | (no public domain) | Background jobs, drift detection, proactive suggestions |
+---
 
-**Railway project**: https://railway.com/project/86f528df-931a-40e9-9bf4-c5a65b17a516
+## API
 
-### Deploy to Railway
+Base URL: `https://amber-core-api-production.up.railway.app`
 
-1. Connect this repo to Railway
-2. Railway will detect each service from the `railway.toml` files
-3. Set the environment variables from `.env.example` for each service
-4. Add a Postgres plugin (Railway has managed Postgres with pgvector)
-5. Run the schema: `psql $DATABASE_URL < apps/api/src/db/schema.sql`
+Auth: `Authorization: Bearer <AMBER_API_KEY>`
 
-### GCP Storage Setup
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/people` | List all people |
+| `GET` | `/api/people/search?q=` | Hybrid semantic + structured search |
+| `POST` | `/api/people` | Create a person |
+| `POST` | `/api/memories` | Ingest a memory |
+| `GET` | `/api/memories` | List memories |
+| `GET` | `/api/action-items` | Open action items |
+| `GET` | `/api/approvals` | Pending approvals |
+| `PATCH` | `/api/approvals/:id` | Approve or reject |
 
-1. Create a GCP project
-2. Create a Cloud Storage bucket (e.g. `amber-assets`)
-3. Create a service account with `Storage Object Admin` role
-4. Download the JSON key
-5. Set `GCP_SERVICE_ACCOUNT_JSON` or `GCP_KEY_FILE` env var
+---
 
 ## Storage
 
-**Database**: Postgres with `pgvector` extension
-**File storage**: GCP Cloud Storage (photos, transcripts, Loom, Fireflies, exports)
-**Cache/Queue**: Redis via Upstash (optional)
+- **Database**: Postgres with `pgvector` extension (add via Railway dashboard)
+- **File storage**: GCP Cloud Storage (photos, transcripts, Loom, Fireflies, exports)
+
+### GCP Setup
+
+1. Create a GCP project and Cloud Storage bucket (e.g. `amber-assets`)
+2. Create a service account with `Storage Object Admin` role
+3. Download the JSON key
+4. Set `GCP_SERVICE_ACCOUNT_JSON` env var in Railway
+
+---
+
+## Deploy
+
+This is a pnpm Turborepo monorepo. Both services deploy from this single repo using a `SERVICE` env var to select which app to start.
+
+### Railway Setup
+
+```bash
+railway login
+railway init --name "amber-core"
+
+# API service
+railway add --service amber-core-api
+railway variables set SERVICE=api ANTHROPIC_API_KEY=... AMBER_API_KEY=... --service amber-core-api
+railway domain --service amber-core-api
+
+# Worker service
+railway add --service amber-core-worker
+railway variables set SERVICE=worker ANTHROPIC_API_KEY=... AMBER_API_URL=https://amber-core-api-production.up.railway.app --service amber-core-worker
+
+# Deploy both
+railway up --service amber-core-api --detach
+railway up --service amber-core-worker --detach
+```
+
+### Database Schema
+
+After provisioning Postgres on Railway:
+
+```bash
+psql $DATABASE_URL < apps/api/src/db/schema.sql
+```
+
+---
 
 ## Development
 
 ```bash
 pnpm install
-pnpm dev          # starts all services in watch mode
-pnpm build        # builds all packages
-pnpm type-check   # TypeScript check
+pnpm dev        # starts all services in watch mode
+pnpm build      # builds all packages
+pnpm type-check # TypeScript check
 ```
 
-## Data Model
-
-Core objects: `Person`, `Memory`, `ActionItem`, `RelationshipState`, `ApprovalTask`, `AmberIdentity`
-
-See `packages/shared-types/src/index.ts` for the full schema.
-
-## API
-
-Base URL: `https://amber-api.railway.app`
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/api/people` | List all people |
-| GET | `/api/people/search?q=` | Hybrid people search |
-| POST | `/api/people` | Create a person |
-| POST | `/api/memories` | Ingest a memory |
-| GET | `/api/memories` | List memories |
-| GET | `/api/action-items` | Open action items |
-| GET | `/api/approvals` | Pending approvals |
-| PATCH | `/api/approvals/:id` | Approve / reject |
+---
 
 ## Messaging
 
 All Amber agents use [Loop Message](https://loopmessage.com) for iMessage delivery.
 
-- API: `POST https://a.loopmessage.com/api/v1/message/send/`
-- Auth: `Authorization: <LOOP_API_KEY>` (no Bearer)
-- Body: `{ contact, text, sender }` where `sender` = sender UUID from dashboard
-- Incoming: webhook `POST /webhook` — payload has `event`, `contact`, `text`, `message_id`
-
+- **API**: `POST https://a.loopmessage.com/api/v1/message/send/`
+- **Auth**: `Authorization: <LOOP_API_KEY>` (no Bearer prefix)
+- **Body**: `{ contact, text, sender }` where `sender` = sender UUID from dashboard
+- **Incoming**: webhook `POST /webhook` — payload: `{ event, contact, text, message_id }`
