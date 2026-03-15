@@ -1,4 +1,5 @@
 import express from 'express'
+import crypto from 'crypto'
 import cors from 'cors'
 import { Pool } from 'pg'
 import { ingestMemory } from '@amber/memory-engine'
@@ -262,4 +263,56 @@ const PORT = process.env.PORT || 8080
 
 app.listen(PORT, () => {
   console.log(`amber-api running on :${PORT}`)
+})
+
+// ============================================================================
+// LOOP MESSAGE WEBHOOK (incoming iMessages → memory ingestion)
+// ============================================================================
+
+app.post('/webhooks/loop-message', async (req, res) => {
+  // Verify Loop Message signature
+  const signature = req.headers['loop-signature'] as string
+  const secretKey = process.env.LOOP_SECRET_KEY
+
+  if (secretKey && signature) {
+    const expected = crypto
+      .createHmac('sha256', secretKey)
+      .update(JSON.stringify(req.body))
+      .digest('hex')
+    if (signature !== expected) {
+      return res.status(401).json({ error: 'Invalid signature' })
+    }
+  }
+
+  const { sender, text, recipient, type } = req.body
+
+  // Only process inbound text messages
+  if (type !== 'message' || !text) {
+    return res.status(200).json({ ok: true })
+  }
+
+  const userId = process.env.AMBER_USER_ID || 'sagar'
+
+  // Auto-ingest if message looks like a memory capture
+  const isMemoryCapture = /^(remember|tag|attach|note|add|update)/i.test(text.trim())
+
+  if (isMemoryCapture) {
+    try {
+      await fetch(`http://localhost:${process.env.PORT || 8080}/api/memories`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.AMBER_API_KEY}`
+        },
+        body: JSON.stringify({
+          rawText: text,
+          source: 'imessage'
+        })
+      })
+    } catch (err: any) {
+      console.error('Auto-ingest failed:', err.message)
+    }
+  }
+
+  res.status(200).json({ ok: true })
 })
