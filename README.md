@@ -79,3 +79,13 @@ Base URL: `https://amber-api.railway.app`
 | GET | `/api/action-items` | Open action items |
 | GET | `/api/approvals` | Pending approvals |
 | PATCH | `/api/approvals/:id` | Approve / reject |
+
+## Messaging
+
+All Amber agents use [Loop Message](https://loopmessage.com) for iMessage delivery.
+
+- API: `POST https://a.loopmessage.com/api/v1/message/send/`
+- Auth: `Authorization: <LOOP_API_KEY>` (no Bearer)
+- Body: `{ contact, text, sender }` where `sender` = sender UUID from dashboard
+- Incoming: webhook `POST /webhook` — payload has `event`, `contact`, `text`, `message_id`
+
